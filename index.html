@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="id"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Absensi Lapangan</title>
+<link rel="manifest" href="manifest.json"><meta name="theme-color" content="#0b6e8a">
+<style>
+:root{--bg:#f1f5f7;--c:#fff;--t:#12232e;--m:#5b6b75;--p:#0b6e8a;--bt:#fff;--b:#d5dee3;--w:#a85a00}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1a21;--c:#16252e;--t:#e6eef2;--m:#93a5af;--p:#4cc2e0;--bt:#06222b;--b:#26394370;--w:#f5b04a}}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--t)}
+main{max-width:760px;margin:auto;padding:12px}
+.top{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;padding:6px 2px}
+.card{background:var(--c);border:1px solid var(--b);border-radius:10px;padding:12px;margin:10px 0}
+.m{color:var(--m);font-size:13px}.w{color:var(--w)}
+button{font:inherit;border:1px solid var(--p);border-radius:8px;padding:9px 14px;background:var(--p);color:var(--bt);cursor:pointer}
+button.g{background:transparent;color:var(--p)}button:disabled{opacity:.4;cursor:default}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--p);outline-offset:2px}
+input,select,textarea{font:inherit;width:100%;padding:9px;margin:4px 0;border:1px solid var(--b);border-radius:8px;background:var(--bg);color:var(--t)}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1 1 120px}
+.tabs button{flex:0 0 auto}
+.sc{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--b);text-align:left;vertical-align:top}
+a{color:var(--p)}
+</style></head>
+<body><main id="app"></main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// ===== ISI DUA BARIS INI (Supabase > Project Settings > API) =====
+const SB_URL='https://GANTI.supabase.co', SB_KEY='GANTI_ANON_KEY';
+// =================================================================
+const sb=supabase.createClient(SB_URL,SB_KEY);
+const $=s=>document.querySelector(s), app=$('#app');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad=n=>String(n).padStart(2,'0');
+const day=()=>{const d=new Date();return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())};
+const hm=t=>t?new Date(t).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'}):'-';
+const ls=(k,v)=>v===undefined?JSON.parse(localStorage.getItem(k)||'null'):localStorage.setItem(k,JSON.stringify(v));
+const late=(a,s)=>a&&s&&Math.abs(new Date(s)-new Date(a))>9e5;
+let me=null, tab='today', Q=ls('q')||[], C=ls('cache')||{day:day(),att:null,visits:[],hosp:[]};
+const commit=()=>{ls('q',Q);ls('cache',C)};
+
+// ---------- GPS, foto, jarak ----------
+function getPos(){return new Promise(res=>{
+  if(!navigator.geolocation){alert('GPS tidak tersedia di perangkat ini.');return res(null)}
+  navigator.geolocation.getCurrentPosition(x=>{
+    const p={lat:x.coords.latitude,lng:x.coords.longitude,acc:Math.round(x.coords.accuracy)};
+    if(p.acc>100&&!confirm('Akurasi GPS rendah (±'+p.acc+' m). Tetap pakai lokasi ini?'))return res(null);
+    res(p)},()=>{alert('Lokasi gagal dibaca. Aktifkan GPS dan izinkan akses lokasi.');res(null)},
+    {enableHighAccuracy:true,timeout:20000,maximumAge:0})})}
+function selfie(){return new Promise(res=>{
+  const i=document.createElement('input');i.type='file';i.accept='image/*';i.setAttribute('capture','user');
+  i.oncancel=()=>res(null);
+  i.onchange=()=>{const f=i.files[0];if(!f)return res(null);const im=new Image();
+    im.onload=()=>{const s=Math.min(1,480/Math.max(im.width,im.height)),c=document.createElement('canvas');
+      c.width=im.width*s;c.height=im.height*s;c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+      res(c.toDataURL('image/jpeg',.6))};im.src=URL.createObjectURL(f)};
+  i.click()})}
+function dist(a,b){const r=x=>x*Math.PI/180,R=6371000,dl=r(b.lat-a.lat),dg=r(b.lng-a.lng);
+  const h=Math.sin(dl/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dg/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
+
+// ---------- antrean offline & sinkron ----------
+async function sync(){
+  if(!navigator.onLine)return;
+  for(const op of [...Q]){
+    try{
+      if(op.photo){const b=await (await fetch(op.photo.data)).blob();
+        const r=await sb.storage.from('selfies').upload(op.photo.path,b,{upsert:true,contentType:'image/jpeg'});if(r.error)break}
+      const r=await sb.from(op.t).upsert(op.row,{onConflict:op.t==='attendance'?'user_id,day':'id'});if(r.error)break;
+      Q=Q.filter(x=>x!==op);ls('q',Q)
+    }catch(e){break}}}
+async function pull(){
+  if(!navigator.onLine||!me)return;
+  const d=day();
+  const [a,v,h]=await Promise.all([
+    sb.from('attendance').select('*').eq('user_id',me.id).eq('day',d).maybeSingle(),
+    sb.from('visits').select('*').eq('user_id',me.id).eq('day',d).order('created_at'),
+    sb.from('hospitals').select('*').order('name')]);
+  if(h.data)C.hosp=h.data;
+  if(!Q.length&&!a.error&&!v.error){C.day=d;C.att=a.data;C.visits=v.data}
+  commit()}
+const rr=()=>{if(!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))render()};
+const done=()=>{commit();render();sync().then(pull).then(rr)};
+
+// ---------- login ----------
+function loginView(msg){
+  app.innerHTML=`<div class="card"><h2>Absensi Lapangan</h2><input id="em" type="email" placeholder="Email" autocomplete="username">
+  <input id="pw" type="password" placeholder="Kata sandi" autocomplete="current-password"><p class="w">${esc(msg||'')}</p>
+  <button onclick="login()">Masuk</button></div>`}
+async function login(){
+  const r=await sb.auth.signInWithPassword({email:$('#em').value.trim(),password:$('#pw').value});
+  if(r.error)return loginView('Email atau kata sandi salah, atau tidak ada internet.');init()}
+async function logout(){await sb.auth.signOut().catch(()=>{});localStorage.removeItem('me');localStorage.removeItem('cache');me=null;loginView()}
+const head=t=>`<div class="top"><b>${t}</b><span class="m">${navigator.onLine?'online':'offline'}${Q.length?' · '+Q.length+' belum terkirim':''}</span><button class="g" onclick="logout()">Keluar</button></div>`;
+
+// ---------- tampilan karyawan ----------
+function empView(){
+  if(C.day!==day())C={...C,day:day(),att:null,visits:[]};
+  const a=C.att||{};
+  const opt=C.hosp.map(h=>`<option value="${h.id}">${esc(h.name)}</option>`).join('');
+  const vl=C.visits.map(v=>{
+    const n=v.hospital_id?(C.hosp.find(h=>h.id===v.hospital_id)||{}).name:v.place_manual;
+    const st=v.status==='rencana'?`<button onclick="ci('${v.id}')">Check-in</button>`
+      :v.status==='berlangsung'?`<textarea id="h${v.id}" rows="3" placeholder="Hasil kunjungan: dokter yang ditemui, hasil pertemuan"></textarea><button onclick="co('${v.id}')">Check-out</button>`
+      :`<div>${esc(v.hasil)}</div>`;
+    return `<div class="card"><b>${esc(n)}</b><div class="m">${esc(v.tujuan)} | ${v.status}${v.ci_at?' | masuk '+hm(v.ci_at):''}${v.co_at?' | keluar '+hm(v.co_at):''}</div>
+    ${v.in_radius===false?'<div class="w">Di luar radius RS</div>':''}${st}</div>`}).join('')||'<p class="m">Belum ada kunjungan hari ini.</p>';
+  app.innerHTML=head('Halo, '+esc(me.name||''))+`
+  <div class="card"><b>Absensi hari ini</b>
+  <p>Masuk: ${a.in_at?hm(a.in_at):(a.in_source==='fingerprint'?'fingerprint kantor':'-')} &nbsp; Pulang: ${a.out_at?hm(a.out_at):'-'}</p>
+  <div class="row"><button onclick="clock('in')" ${a.in_at?'disabled':''}>Mulai Kerja</button>
+  <button class="g" onclick="clock('out')" ${a.out_at?'disabled':''}>Selesai Kerja</button></div></div>
+  <div class="card"><b>Tambah kunjungan</b>
+  <select id="vh" onchange="$('#vm').style.display=this.value==='x'?'':'none'">${opt}<option value="x">Lainnya (ketik manual)</option></select>
+  <input id="vm" placeholder="Nama tempat" style="display:${C.hosp.length?'none':''}">
+  <input id="vt" placeholder="Tujuan (demo alat, follow-up, penagihan...)">
+  <button onclick="addVisit()">Simpan rencana</button></div>
+  <h3>Kunjungan hari ini</h3>${vl}`;
+  if(!C.hosp.length)$('#vh').value='x'}
+function patch(f,photo){C.att={...(C.att||{}),...f};
+  Q.push({t:'attendance',row:{user_id:me.id,day:day(),...f},photo});commit()}
+async function clock(k){
+  const a=C.att||{};
+  if(k==='out'&&!a.in_at&&!a.in_source&&confirm('Absen masuk hari ini lewat fingerprint kantor?\nOK = ya, Batal = tidak'))patch({in_source:'fingerprint'});
+  const p=await getPos();if(!p)return;const img=await selfie();if(!img)return;
+  const path=me.id+'/'+day()+'-'+k+'.jpg';
+  patch({[k+'_at']:new Date().toISOString(),[k+'_lat']:p.lat,[k+'_lng']:p.lng,[k+'_acc']:p.acc,[k+'_photo']:path,[k+'_source']:'aplikasi'},{path,data:img});
+  done()}
+function addVisit(){
+  const h=$('#vh').value,m=$('#vm').value.trim(),t=$('#vt').value.trim();
+  if(!t||(h==='x'&&!m))return alert('Isi tempat dan tujuan kunjungan.');
+  const v={id:crypto.randomUUID(),user_id:me.id,day:day(),hospital_id:h==='x'?null:h,place_manual:h==='x'?m:null,tujuan:t,status:'rencana'};
+  C.visits.push(v);Q.push({t:'visits',row:{...v}});done()}
+async function ci(id){
+  const v=C.visits.find(x=>x.id===id),p=await getPos();if(!p)return;
+  const h=C.hosp.find(x=>x.id===v.hospital_id);
+  Object.assign(v,{status:'berlangsung',ci_at:new Date().toISOString(),ci_lat:p.lat,ci_lng:p.lng,ci_acc:p.acc,in_radius:h?dist(p,h)<=h.radius:null});
+  Q.push({t:'visits',row:{...v}});done()}
+async function co(id){
+  const v=C.visits.find(x=>x.id===id),r=$('#h'+id).value.trim();
+  if(!r)return alert('Isi keterangan hasil (nama dokter dan hasil pertemuan).');
+  const p=await getPos();if(!p)return;
+  Object.assign(v,{status:'selesai',co_at:new Date().toISOString(),co_lat:p.lat,co_lng:p.lng,co_acc:p.acc,hasil:r});
+  Q.push({t:'visits',row:{...v}});done()}
+
+// ---------- tampilan admin ----------
+function adminView(){
+  const tb=(k,l)=>`<button class="${tab===k?'':'g'}" onclick="tab='${k}';adminView()">${l}</button>`;
+  app.innerHTML=head('Atasan')+`<div class="row tabs">${tb('today','Hari ini')}${tb('rekap','Rekap')}${tb('rs','Data RS')}</div><div id="ac"><p class="m">Memuat...</p></div>`;
+  ({today:aToday,rekap:aRekap,rs:aHosp})[tab]()}
+const flagA=a=>[late(a.in_at,a.in_synced)||late(a.out_at,a.out_synced)?'jam HP selisih':'',(a.in_acc>100||a.out_acc>100)?'GPS kasar':''].filter(Boolean).join(', ');
+const flagV=v=>[v.in_radius===false?'di luar radius':'',late(v.ci_at,v.ci_synced)||late(v.co_at,v.co_synced)?'jam HP selisih':''].filter(Boolean).join(', ');
+const pic=(p,l)=>p?` <a href="#" onclick="foto('${p}');return false">${l}</a>`:'';
+async function foto(p){const r=await sb.storage.from('selfies').createSignedUrl(p,300);if(r.data)window.open(r.data.signedUrl);else alert('Foto belum tersedia.')}
+const vTable=rows=>`<div class="sc"><table><tr><th>Tgl</th><th>Karyawan</th><th>Tempat</th><th>Tujuan</th><th>Masuk-Keluar</th><th>Hasil</th><th>Catatan</th></tr>${rows.map(v=>`<tr><td>${v.day}</td><td>${esc(v.profiles?.name)}</td><td>${esc(v.hospitals?.name||v.place_manual)}</td><td>${esc(v.tujuan)}</td><td>${hm(v.ci_at)}-${hm(v.co_at)}</td><td>${esc(v.hasil)}</td><td class="w">${flagV(v)}</td></tr>`).join('')||'<tr><td colspan="7" class="m">Belum ada kunjungan.</td></tr>'}</table></div>`;
+const aTable=rows=>`<div class="sc"><table><tr><th>Tgl</th><th>Karyawan</th><th>Masuk</th><th>Pulang</th><th>Catatan</th></tr>${rows.map(a=>`<tr><td>${a.day}</td><td>${esc(a.profiles?.name)}</td><td>${a.in_at?hm(a.in_at)+pic(a.in_photo,'foto'):(a.in_source==='fingerprint'?'fingerprint':'-')}</td><td>${a.out_at?hm(a.out_at)+pic(a.out_photo,'foto'):'-'}</td><td class="w">${flagA(a)}</td></tr>`).join('')||'<tr><td colspan="5" class="m">Belum ada data.</td></tr>'}</table></div>`;
+async function aToday(){
+  const d=day();
+  const [p,a,v]=await Promise.all([sb.from('profiles').select('id,name').eq('role','karyawan').eq('active',true).order('name'),
+    sb.from('attendance').select('*,profiles(name)').eq('day',d),sb.from('visits').select('*,profiles(name),hospitals(name)').eq('day',d).order('ci_at')]);
+  if(p.error)return $('#ac').innerHTML='<p class="w">Gagal memuat. Periksa koneksi.</p>';
+  const rows=p.data.map(u=>{const x=(a.data||[]).find(y=>y.user_id===u.id)||{},n=(v.data||[]).filter(y=>y.user_id===u.id);
+    const s=x.out_at?'Sudah pulang':(x.in_at||x.in_source||n.some(y=>y.ci_at))?'Sedang kerja':'Belum absen';
+    return `<tr><td>${esc(u.name)}</td><td>${s}</td><td>${x.in_at?hm(x.in_at):(x.in_source==='fingerprint'?'fingerprint':'-')}</td><td>${hm(x.out_at)}</td><td>${n.length}</td><td class="w">${flagA(x)}</td></tr>`}).join('');
+  $('#ac').innerHTML=`<div class="card sc"><table><tr><th>Karyawan</th><th>Status</th><th>Masuk</th><th>Pulang</th><th>Kunjungan</th><th>Catatan</th></tr>${rows}</table></div><h3>Kunjungan hari ini</h3>${vTable(v.data||[])}`}
+async function aRekap(){
+  $('#ac').innerHTML=`<div class="row"><input id="df" type="date" value="${day()}"><input id="dt" type="date" value="${day()}"><button onclick="loadRekap()">Tampilkan</button></div><div id="rk"></div>`;loadRekap()}
+async function loadRekap(){
+  const f=$('#df').value,t=$('#dt').value;
+  const [a,v]=await Promise.all([sb.from('attendance').select('*,profiles(name)').gte('day',f).lte('day',t).order('day',{ascending:false}),
+    sb.from('visits').select('*,profiles(name),hospitals(name)').gte('day',f).lte('day',t).order('day',{ascending:false})]);
+  $('#rk').innerHTML=`<h3>Absensi</h3>${aTable(a.data||[])}<h3>Kunjungan</h3>${vTable(v.data||[])}`}
+async function aHosp(){
+  const r=await sb.from('hospitals').select('*').order('name');
+  $('#ac').innerHTML=`<div class="card"><b>Tambah RS</b><input id="hn" placeholder="Nama RS">
+  <div class="row"><input id="ha" type="number" step="any" placeholder="Latitude"><input id="ho" type="number" step="any" placeholder="Longitude"><input id="hr" type="number" value="200" placeholder="Radius (m)"></div>
+  <div class="row"><button class="g" onclick="myLoc()">Pakai lokasi saya</button><button onclick="addHosp()">Simpan RS</button></div></div>
+  <div class="card sc"><table>${(r.data||[]).map(h=>`<tr><td>${esc(h.name)}</td><td>${h.lat.toFixed(5)}, ${h.lng.toFixed(5)}</td><td>${h.radius} m</td><td><button class="g" onclick="delHosp('${h.id}')">Hapus</button></td></tr>`).join('')||'<tr><td class="m">Belum ada RS.</td></tr>'}</table></div>`}
+async function myLoc(){const p=await getPos();if(p){$('#ha').value=p.lat;$('#ho').value=p.lng}}
+async function addHosp(){
+  const n=$('#hn').value.trim(),la=parseFloat($('#ha').value),lo=parseFloat($('#ho').value),ra=parseInt($('#hr').value)||200;
+  if(!n||isNaN(la)||isNaN(lo))return alert('Isi nama, latitude, dan longitude.');
+  const r=await sb.from('hospitals').insert({name:n,lat:la,lng:lo,radius:ra});if(r.error)alert('Gagal: '+r.error.message);aHosp()}
+async function delHosp(id){if(confirm('Hapus RS ini?')){await sb.from('hospitals').delete().eq('id',id);aHosp()}}
+
+// ---------- mulai ----------
+const render=()=>!me?loginView():me.role==='admin'?adminView():empView();
+async function init(){
+  const {data:{session}}=await sb.auth.getSession();
+  if(!session)return loginView();
+  me=ls('me');
+  if(navigator.onLine){const r=await sb.from('profiles').select('*').eq('id',session.user.id).single();if(r.data){me=r.data;ls('me',me)}}
+  if(!me)return loginView();
+  render();
+  if(me.role!=='admin'){await sync();await pull();rr()}}
+addEventListener('online',()=>{if(me&&me.role!=='admin')sync().then(pull).then(rr)});
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');
+init();
+</script></body></html>
