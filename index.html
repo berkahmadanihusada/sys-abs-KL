@@ -30,7 +30,7 @@ a{color:var(--p)}
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 // ===== ISI DUA BARIS INI (Supabase > Project Settings > API) =====
-const SB_URL='https://hcbsxcgdhdjbofyhwldc.supabase.co', SB_KEY='sb_publishable_NbeZV3O8rS3chRvE3FczNw_PRjHNIN6';
+const SB_URL='https://GANTI.supabase.co', SB_KEY='GANTI_ANON_KEY';
 // =================================================================
 const sb=supabase.createClient(SB_URL,SB_KEY);
 const $=s=>document.querySelector(s), app=$('#app');
@@ -51,8 +51,8 @@ function getPos(){return new Promise(res=>{
     if(p.acc>100&&!confirm('Akurasi GPS rendah (±'+p.acc+' m). Tetap pakai lokasi ini?'))return res(null);
     res(p)},()=>{alert('Lokasi gagal dibaca. Aktifkan GPS dan izinkan akses lokasi.');res(null)},
     {enableHighAccuracy:true,timeout:20000,maximumAge:0})})}
-function selfie(){return new Promise(res=>{
-  const i=document.createElement('input');i.type='file';i.accept='image/*';i.setAttribute('capture','user');
+function snap(){return new Promise(res=>{
+  const i=document.createElement('input');i.type='file';i.accept='image/*';i.setAttribute('capture','environment');
   i.oncancel=()=>res(null);
   i.onchange=()=>{const f=i.files[0];if(!f)return res(null);const im=new Image();
     im.onload=()=>{const s=Math.min(1,480/Math.max(im.width,im.height)),c=document.createElement('canvas');
@@ -139,22 +139,23 @@ function patch(f,photo){C.att={...(C.att||{}),...f};
 async function clock(k){
   const a=C.att||{};
   if(k==='out'&&me.pakai_fp!==false&&!a.in_at&&!a.in_source&&confirm('Absen masuk hari ini lewat fingerprint kantor?\nOK = ya, Batal = tidak'))patch({in_source:'fingerprint'});
-  const p=await getPos();if(!p)return;const img=await selfie();if(!img)return;
-  const path=me.id+'/'+day()+'-'+k+'.jpg';
-  patch({[k+'_at']:new Date().toISOString(),[k+'_lat']:p.lat,[k+'_lng']:p.lng,[k+'_acc']:p.acc,[k+'_photo']:path,[k+'_source']:'aplikasi'},{path,data:img});
+  patch({[k+'_at']:new Date().toISOString(),[k+'_source']:'aplikasi'});
   done()}
 async function addVisit(now){
   const h=$('#vh').value,m=$('#vm').value.trim(),t=$('#vt').value.trim();
   if(h==='x'&&!m)return alert('Isi nama lokasi.');
   const v={id:crypto.randomUUID(),user_id:me.id,day:day(),hospital_id:h==='x'?null:h,place_manual:h==='x'?m:null,tujuan:t||null,status:'rencana'};
-  if(now){const p=await getPos();if(!p)return;const hs=C.hosp.find(x=>x.id===v.hospital_id);
-    Object.assign(v,{status:'berlangsung',ci_at:new Date().toISOString(),ci_lat:p.lat,ci_lng:p.lng,ci_acc:p.acc,in_radius:hs?dist(p,hs)<=hs.radius:null})}
-  C.visits.push(v);Q.push({t:'visits',row:{...v}});done()}
+  let ph;
+  if(now){const p=await getPos();if(!p)return;const img=await snap();if(!img)return;
+    const hs=C.hosp.find(x=>x.id===v.hospital_id),path=me.id+'/'+v.id+'-ci.jpg';ph={path,data:img};
+    Object.assign(v,{status:'berlangsung',ci_at:new Date().toISOString(),ci_lat:p.lat,ci_lng:p.lng,ci_acc:p.acc,ci_photo:path,in_radius:hs?dist(p,hs)<=hs.radius:null})}
+  C.visits.push(v);Q.push({t:'visits',row:{...v},photo:ph});done()}
 async function ci(id){
   const v=C.visits.find(x=>x.id===id),p=await getPos();if(!p)return;
-  const h=C.hosp.find(x=>x.id===v.hospital_id);
-  Object.assign(v,{status:'berlangsung',ci_at:new Date().toISOString(),ci_lat:p.lat,ci_lng:p.lng,ci_acc:p.acc,in_radius:h?dist(p,h)<=h.radius:null});
-  Q.push({t:'visits',row:{...v}});done()}
+  const img=await snap();if(!img)return;
+  const h=C.hosp.find(x=>x.id===v.hospital_id),path=me.id+'/'+id+'-ci.jpg';
+  Object.assign(v,{status:'berlangsung',ci_at:new Date().toISOString(),ci_lat:p.lat,ci_lng:p.lng,ci_acc:p.acc,ci_photo:path,in_radius:h?dist(p,h)<=h.radius:null});
+  Q.push({t:'visits',row:{...v},photo:{path,data:img}});done()}
 async function co(id){
   const v=C.visits.find(x=>x.id===id),r=$('#h'+id).value.trim();
   if(!r)return alert('Isi keterangan hasil (nama dokter dan hasil pertemuan).');
@@ -172,7 +173,7 @@ const flagV=v=>[v.in_radius===false?'di luar radius':'',late(v.ci_at,v.ci_synced
 const kat=p=>p?.kategori?` <span class="m">(${esc(p.kategori)})</span>`:'';
 const pic=(p,l)=>p?` <a href="#" onclick="foto('${p}');return false">${l}</a>`:'';
 async function foto(p){const r=await sb.storage.from('selfies').createSignedUrl(p,300);if(r.data)window.open(r.data.signedUrl);else alert('Foto belum tersedia.')}
-const vTable=rows=>`<div class="sc"><table><tr><th>Tgl</th><th>Karyawan</th><th>Tempat</th><th>Tujuan</th><th>Masuk-Keluar</th><th>Hasil</th><th>Catatan</th></tr>${rows.map(v=>`<tr><td>${v.day}</td><td>${esc(v.profiles?.name)+kat(v.profiles)}</td><td>${esc(v.hospitals?.name||v.place_manual)}</td><td>${esc(v.tujuan)}</td><td>${hm(v.ci_at)}-${hm(v.co_at)}</td><td>${esc(v.hasil)}</td><td class="w">${flagV(v)}</td></tr>`).join('')||'<tr><td colspan="7" class="m">Belum ada kegiatan.</td></tr>'}</table></div>`;
+const vTable=rows=>`<div class="sc"><table><tr><th>Tgl</th><th>Karyawan</th><th>Tempat</th><th>Tujuan</th><th>Masuk-Keluar</th><th>Hasil</th><th>Catatan</th></tr>${rows.map(v=>`<tr><td>${v.day}</td><td>${esc(v.profiles?.name)+kat(v.profiles)}</td><td>${esc(v.hospitals?.name||v.place_manual)}</td><td>${esc(v.tujuan)}</td><td>${hm(v.ci_at)}-${hm(v.co_at)}${pic(v.ci_photo,'foto')}</td><td>${esc(v.hasil)}</td><td class="w">${flagV(v)}</td></tr>`).join('')||'<tr><td colspan="7" class="m">Belum ada kegiatan.</td></tr>'}</table></div>`;
 const aTable=rows=>`<div class="sc"><table><tr><th>Tgl</th><th>Karyawan</th><th>Masuk</th><th>Pulang</th><th>Catatan</th></tr>${rows.map(a=>`<tr><td>${a.day}</td><td>${esc(a.profiles?.name)+kat(a.profiles)}</td><td>${a.in_at?hm(a.in_at)+pic(a.in_photo,'foto'):(a.in_source==='fingerprint'?'fingerprint':'-')}</td><td>${a.out_at?hm(a.out_at)+pic(a.out_photo,'foto'):'-'}</td><td class="w">${flagA(a)}</td></tr>`).join('')||'<tr><td colspan="5" class="m">Belum ada data.</td></tr>'}</table></div>`;
 async function aToday(){
   const d=day();
