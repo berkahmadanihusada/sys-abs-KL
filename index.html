@@ -28,9 +28,10 @@ a{color:var(--p)}
 </style></head>
 <body><main id="app"></main>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 // ===== ISI DUA BARIS INI (Supabase > Project Settings > API) =====
-const SB_URL='https://hcbsxcgdhdjbofyhwldc.supabase.co', SB_KEY='sb_publishable_NbeZV3O8rS3chRvE3FczNw_PRjHNIN6';
+const SB_URL='https://GANTI.supabase.co', SB_KEY='GANTI_ANON_KEY';
 // =================================================================
 const sb=supabase.createClient(SB_URL,SB_KEY);
 const $=s=>document.querySelector(s), app=$('#app');
@@ -97,7 +98,7 @@ async function logout(){await sb.auth.signOut().catch(()=>{});localStorage.remov
 const catOpts=cur=>{const l=[...(C.cats||[])];if(cur&&!l.includes(cur))l.push(cur);return l.map(k=>`<option ${k===cur?'selected':''}>${esc(k)}</option>`).join('')};
 const drawer=()=>`<div class="ov" id="ov" onclick="prof(0)"></div><aside class="dr" id="dr" aria-label="Profil"><b>Profil</b>
 <p class="m">Akun yang dipakai</p><div>${esc(me.email||'-')}</div>
-<p class="m">Nama lengkap</p><input id="pn" value="${esc(me.name)}">
+<p class="m">Versi aplikasi: 6</p><p class="m">Nama lengkap</p><input id="pn" value="${esc(me.name)}">
 ${me.role==='admin'?'':`<p class="m">Kategori karyawan</p><select id="pk"><option value="">Pilih kategori</option>${catOpts(me.kategori)}</select>`}
 <div class="row"><button onclick="saveProf()">Simpan</button><button class="g" onclick="logout()">Keluar</button></div></aside>`;
 const prof=o=>{$('#dr').classList.toggle('o',!!o);$('#ov').classList.toggle('o',!!o)};
@@ -172,8 +173,14 @@ const flagA=a=>[late(a.in_at,a.in_synced)||late(a.out_at,a.out_synced)?'jam HP s
 const flagV=v=>[v.in_radius===false?'di luar radius':'',late(v.ci_at,v.ci_synced)||late(v.co_at,v.co_synced)?'jam HP selisih':''].filter(Boolean).join(', ');
 const kat=p=>p?.kategori?` <span class="m">(${esc(p.kategori)})</span>`:'';
 const pic=(p,l)=>p?` <a href="#" onclick="foto('${p}');return false">${l}</a>`:'';
-async function foto(p){const r=await sb.storage.from('selfies').createSignedUrl(p,300);if(r.data)window.open(r.data.signedUrl);else alert('Foto belum tersedia.')}
-const vTable=rows=>`<div class="sc"><table><tr><th>Tgl</th><th>Karyawan</th><th>Tempat</th><th>Tujuan</th><th>Masuk-Keluar</th><th>Hasil</th><th>Catatan</th></tr>${rows.map(v=>`<tr><td>${v.day}</td><td>${esc(v.profiles?.name)+kat(v.profiles)}</td><td>${esc(v.hospitals?.name||v.place_manual)}</td><td>${esc(v.tujuan)}</td><td>${hm(v.ci_at)}-${hm(v.co_at)}${pic(v.ci_photo,'foto')}</td><td>${esc(v.hasil)}</td><td class="w">${flagV(v)}</td></tr>`).join('')||'<tr><td colspan="7" class="m">Belum ada kegiatan.</td></tr>'}</table></div>`;
+async function foto(p){
+  const r=await sb.storage.from('selfies').createSignedUrl(p,300);
+  if(!r.data)return alert('Foto tidak bisa dimuat: '+(r.error?.message||'belum tersedia'));
+  const d=document.createElement('div');d.className='ov o';d.style.cssText='display:flex;align-items:center;justify-content:center;padding:12px';
+  d.innerHTML='<img alt="Foto kegiatan" src="'+r.data.signedUrl+'" style="max-width:100%;max-height:100%;border-radius:8px">';
+  d.onclick=()=>d.remove();document.body.appendChild(d)}
+const peta=v=>v.ci_lat!=null?` <a href="https://www.google.com/maps?q=${v.ci_lat},${v.ci_lng}" target="_blank" rel="noopener">peta</a>`:'';
+const vTable=rows=>`<div class="sc"><table><tr><th>Tgl</th><th>Karyawan</th><th>Tempat</th><th>Tujuan</th><th>Masuk-Keluar</th><th>Hasil</th><th>Catatan</th></tr>${rows.map(v=>`<tr><td>${v.day}</td><td>${esc(v.profiles?.name)+kat(v.profiles)}</td><td>${esc(v.hospitals?.name||v.place_manual)}</td><td>${esc(v.tujuan)}</td><td>${hm(v.ci_at)}-${hm(v.co_at)}${pic(v.ci_photo,'foto')}${peta(v)}${v.ci_at&&!v.ci_photo?' <span class="m">(tanpa foto)</span>':''}</td><td>${esc(v.hasil)}</td><td class="w">${flagV(v)}</td></tr>`).join('')||'<tr><td colspan="7" class="m">Belum ada kegiatan.</td></tr>'}</table></div>`;
 const aTable=rows=>`<div class="sc"><table><tr><th>Tgl</th><th>Karyawan</th><th>Masuk</th><th>Pulang</th><th>Catatan</th></tr>${rows.map(a=>`<tr><td>${a.day}</td><td>${esc(a.profiles?.name)+kat(a.profiles)}</td><td>${a.in_at?hm(a.in_at)+pic(a.in_photo,'foto'):(a.in_source==='fingerprint'?'fingerprint':'-')}</td><td>${a.out_at?hm(a.out_at)+pic(a.out_photo,'foto'):'-'}</td><td class="w">${flagA(a)}</td></tr>`).join('')||'<tr><td colspan="5" class="m">Belum ada data.</td></tr>'}</table></div>`;
 async function aToday(){
   const d=day();
@@ -187,13 +194,24 @@ async function aToday(){
 async function aRekap(){
   const p=await sb.from('profiles').select('kategori').eq('role','karyawan');
   const ks=[...new Set((p.data||[]).map(u=>u.kategori).filter(Boolean))];
-  $('#ac').innerHTML=`<div class="row"><input id="df" type="date" value="${day()}"><input id="dt" type="date" value="${day()}"><select id="dk"><option value="">Semua kategori</option>${ks.map(k=>`<option>${esc(k)}</option>`).join('')}</select><button onclick="loadRekap()">Tampilkan</button></div><div id="rk"></div>`;loadRekap()}
+  $('#ac').innerHTML=`<div class="row"><input id="df" type="date" value="${day()}"><input id="dt" type="date" value="${day()}"><select id="dk"><option value="">Semua kategori</option>${ks.map(k=>`<option>${esc(k)}</option>`).join('')}</select><button onclick="loadRekap()">Tampilkan</button><button class="g" onclick="exportXlsx()">Unduh Excel</button></div><div id="rk"></div>`;loadRekap()}
+function exportXlsx(){
+  if(!window.XLSX)return alert('Pustaka Excel belum termuat. Periksa internet lalu coba lagi.');
+  if(!window.RK||!(RK.a.length||RK.v.length))return alert('Tidak ada data untuk diunduh. Tekan Tampilkan dulu.');
+  const nm=x=>x.profiles?.name||'',kt=x=>x.profiles?.kategori||'',mp=v=>v.ci_lat!=null?'https://www.google.com/maps?q='+v.ci_lat+','+v.ci_lng:'';
+  const A=RK.a.map(a=>({Tanggal:a.day,Nama:nm(a),Kategori:kt(a),Masuk:hm(a.in_at),'Sumber masuk':a.in_source||'',Pulang:hm(a.out_at),'Sumber pulang':a.out_source||'',Catatan:flagA(a)}));
+  const V=RK.v.map(v=>({Tanggal:v.day,Nama:nm(v),Kategori:kt(v),Lokasi:v.hospitals?.name||v.place_manual||'',Keperluan:v.tujuan||'','Check-in':hm(v.ci_at),'Check-out':hm(v.co_at),Peta:mp(v),'Akurasi GPS (m)':v.ci_acc??'','Ada foto':v.ci_photo?'Ya':'Tidak',Hasil:v.hasil||'',Catatan:flagV(v)}));
+  const wb=XLSX.utils.book_new();
+  [['Absensi',A],['Kegiatan',V]].forEach(([n,d])=>{const ws=XLSX.utils.json_to_sheet(d.length?d:[{Info:'Tidak ada data'}]);
+    ws['!cols']=Object.keys(d[0]||{Info:1}).map(k=>({wch:Math.max(14,k.length+2)}));XLSX.utils.book_append_sheet(wb,ws,n)});
+  XLSX.writeFile(wb,'rekap-'+RK.f+'_sd_'+RK.t+'.xlsx')}
 async function loadRekap(){
   const f=$('#df').value,t=$('#dt').value;
   const [a,v]=await Promise.all([sb.from('attendance').select('*,profiles(name,kategori)').gte('day',f).lte('day',t).order('day',{ascending:false}),
     sb.from('visits').select('*,profiles(name,kategori),hospitals(name)').gte('day',f).lte('day',t).order('day',{ascending:false})]);
   const k=$('#dk').value,fl=r=>(r||[]).filter(x=>!k||x.profiles?.kategori===k);
-  $('#rk').innerHTML=`<h3>Absensi</h3>${aTable(fl(a.data))}<h3>Kegiatan</h3>${vTable(fl(v.data))}`}
+  window.RK={a:fl(a.data),v:fl(v.data),f:$('#df').value,t:$('#dt').value};
+  $('#rk').innerHTML=`<h3>Absensi</h3>${aTable(RK.a)}<h3>Kegiatan</h3>${vTable(RK.v)}`}
 async function aEmp(){
   const [r,c]=await Promise.all([sb.from('profiles').select('*').eq('role','karyawan').order('name'),sb.from('categories').select('name').order('name')]);
   const cats=(c.data||[]).map(x=>x.name);
