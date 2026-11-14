@@ -31,7 +31,7 @@ a{color:var(--p)}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 // ===== ISI DUA BARIS INI (Supabase > Project Settings > API) =====
-const SB_URL='https://hcbsxcgdhdjbofyhwldc.supabase.co', SB_KEY='sb_publishable_NbeZV3O8rS3chRvE3FczNw_PRjHNIN6';
+const SB_URL='https://GANTI.supabase.co', SB_KEY='GANTI_ANON_KEY';
 // =================================================================
 const sb=supabase.createClient(SB_URL,SB_KEY);
 const $=s=>document.querySelector(s), app=$('#app');
@@ -54,8 +54,8 @@ function getPos(){return new Promise(res=>{
     {enableHighAccuracy:true,timeout:20000,maximumAge:0})})}
 function snap(){return new Promise(res=>{
   const i=document.createElement('input');i.type='file';i.accept='image/*';i.setAttribute('capture','environment');
-  i.oncancel=()=>res(null);
-  i.onchange=()=>{const f=i.files[0];if(!f)return res(null);const im=new Image();
+  i.style.display='none';document.body.appendChild(i);i.oncancel=()=>{i.remove();res(null)};
+  i.onchange=()=>{const f=i.files[0];i.remove();if(!f)return res(null);const im=new Image();
     im.onload=()=>{const s=Math.min(1,480/Math.max(im.width,im.height)),c=document.createElement('canvas');
       c.width=im.width*s;c.height=im.height*s;c.getContext('2d').drawImage(im,0,0,c.width,c.height);
       res(c.toDataURL('image/jpeg',.6))};im.src=URL.createObjectURL(f)};
@@ -98,7 +98,7 @@ async function logout(){await sb.auth.signOut().catch(()=>{});localStorage.remov
 const catOpts=cur=>{const l=[...(C.cats||[])];if(cur&&!l.includes(cur))l.push(cur);return l.map(k=>`<option ${k===cur?'selected':''}>${esc(k)}</option>`).join('')};
 const drawer=()=>`<div class="ov" id="ov" onclick="prof(0)"></div><aside class="dr" id="dr" aria-label="Profil"><b>Profil</b>
 <p class="m">Akun yang dipakai</p><div>${esc(me.email||'-')}</div>
-<p class="m">Versi aplikasi: 6</p><p class="m">Nama lengkap</p><input id="pn" value="${esc(me.name)}">
+<p class="m">Versi aplikasi: 7</p><p class="m">Nama lengkap</p><input id="pn" value="${esc(me.name)}">
 ${me.role==='admin'?'':`<p class="m">Kategori karyawan</p><select id="pk"><option value="">Pilih kategori</option>${catOpts(me.kategori)}</select>`}
 <div class="row"><button onclick="saveProf()">Simpan</button><button class="g" onclick="logout()">Keluar</button></div></aside>`;
 const prof=o=>{$('#dr').classList.toggle('o',!!o);$('#ov').classList.toggle('o',!!o)};
@@ -147,13 +147,13 @@ async function addVisit(now){
   if(h==='x'&&!m)return alert('Isi nama lokasi.');
   const v={id:crypto.randomUUID(),user_id:me.id,day:day(),hospital_id:h==='x'?null:h,place_manual:h==='x'?m:null,tujuan:t||null,status:'rencana'};
   let ph;
-  if(now){const p=await getPos();if(!p)return;const img=await snap();if(!img)return;
+  if(now){const img=await snap();if(!img)return;const p=await getPos();if(!p)return;
     const hs=C.hosp.find(x=>x.id===v.hospital_id),path=me.id+'/'+v.id+'-ci.jpg';ph={path,data:img};
     Object.assign(v,{status:'berlangsung',ci_at:new Date().toISOString(),ci_lat:p.lat,ci_lng:p.lng,ci_acc:p.acc,ci_photo:path,in_radius:hs?dist(p,hs)<=hs.radius:null})}
   C.visits.push(v);Q.push({t:'visits',row:{...v},photo:ph});done()}
 async function ci(id){
-  const v=C.visits.find(x=>x.id===id),p=await getPos();if(!p)return;
   const img=await snap();if(!img)return;
+  const v=C.visits.find(x=>x.id===id),p=await getPos();if(!p)return;
   const h=C.hosp.find(x=>x.id===v.hospital_id),path=me.id+'/'+id+'-ci.jpg';
   Object.assign(v,{status:'berlangsung',ci_at:new Date().toISOString(),ci_lat:p.lat,ci_lng:p.lng,ci_acc:p.acc,ci_photo:path,in_radius:h?dist(p,h)<=h.radius:null});
   Q.push({t:'visits',row:{...v},photo:{path,data:img}});done()}
